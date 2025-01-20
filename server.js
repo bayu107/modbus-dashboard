@@ -1,54 +1,53 @@
-const express = require('express');
-const ModbusRTU = require('modbus-serial');
+require('dotenv').config(); // Load konfigurasi dari .env
 
+const express = require('express');
+const ModbusRTU = require('modbus-serial'); // Untuk komunikasi Modbus
 const app = express();
 const port = 3000;
 
-// Konfigurasi Modbus TCP
-const client = new ModbusRTU();
+// Ambil konfigurasi dari file .env
+const MODBUS_HOST = process.env.MODBUS_HOST || '127.0.0.1';
+const MODBUS_PORT = parseInt(process.env.MODBUS_PORT) || 502;
+const MODBUS_ID = parseInt(process.env.MODBUS_ID) || 1;
+const REGISTER_START = parseInt(process.env.REGISTER_START) || 0;
+const REGISTER_COUNT = parseInt(process.env.REGISTER_COUNT) || 5;
 
-client.connectTCP('127.0.0.1', { port: 502 }) // Menghubungkan ke server Modbus
-    .then(() => {
-        console.log('Connected to Modbus TCP server');
-    })
-    .catch(err => {
-        console.error('Connection error:', err);
-    });
+const modbusClient = new ModbusRTU();
 
-// Pengaturan view engine
 app.set('view engine', 'ejs');
-app.set('views', __dirname + '/views');
+app.use(express.static('public'));
 
-// Nama-nama register
-const registerNames = [
-    "Temperature",  // Register 0
-    "Pressure",     // Register 1
-    "Humidity",     // Register 2
-    "Status",       // Register 3
-    "Error Code"    // Register 4
-];
+// Connect to Modbus server
+async function connectModbus() {
+  try {
+    await modbusClient.connectTCP(MODBUS_HOST, { port: MODBUS_PORT });
+    modbusClient.setID(MODBUS_ID);
+    console.log('Connected to Modbus server');
+  } catch (error) {
+    console.error('Failed to connect to Modbus server:', error);
+  }
+}
 
-// Halaman utama
-app.get('/', (req, res) => {
-    // Membaca data dari Modbus TCP
-    Promise.all([
-        client.readHoldingRegisters(0, 5), // Membaca 5 register dari alamat 0
-    ])
-    .then(data => {
-        // Menggabungkan nama register dengan nilainya
-        const registers = data[0].data.map((value, index) => ({
-            name: registerNames[index],
-            value: value
-        }));
-        res.render('dashboard', { registers: registers });
-    })
-    .catch(err => {
-        console.error('Error reading data:', err);
-        res.send('Error reading data from Modbus TCP');
-    });
+// Fetch Modbus data
+async function fetchModbusData() {
+  try {
+    const data = await modbusClient.readHoldingRegisters(REGISTER_START, REGISTER_COUNT);
+    return data.data;
+  } catch (error) {
+    console.error('Failed to fetch Modbus data:', error);
+    return [];
+  }
+}
+
+// Route for dashboard
+app.get('/', async (req, res) => {
+  const modbusData = await fetchModbusData();
+  res.render('dashboard', { modbusData });
 });
 
-// Mulai server
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+// Start server
+app.listen(port, async () => {
+  console.log(`Server running on http://localhost:${port}`);
+  console.log(`Access the server at: http://${getLocalIP()}:${port}`); // Print local IP
+  await connectModbus();
 });
